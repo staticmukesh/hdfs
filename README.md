@@ -98,6 +98,20 @@ override this in your `.bashrc` or `.profile`:
 
     export HADOOP_USER_NAME=username
 
+
+Kerberos support
+----------------
+There is experimental Kerberos support for authentication (and authentication only). The following should be enough to get you started:
+
+    export HADOOP_KEYTAB="path/to/keytab" 
+    export HADOOP_KRB_CONF="path/to/krb/conf"
+
+Note that if there is key material for more than one principal in the keytab, the first principal that is found is used for authentication against hadoop.
+
+Furthermore, this requires a patch of the kerberos that is used (`gokrb5`), which is in the process of being reviewed: until it's officially part of `gokrb5`. Meanwhile, you may find the patch here: https://github.com/sqooba/gokrb5/tree/waiting-for-merge 
+
+It can be installed by being manually cloned into your go `src` tree under `src/gopkg.in/jcmturner/gokrb5.v3`
+
 Compatibility
 -------------
 

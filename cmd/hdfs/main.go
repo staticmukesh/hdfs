@@ -3,13 +3,19 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
-
 	"github.com/colinmarc/hdfs"
 	"github.com/pborman/getopt"
+	"gopkg.in/jcmturner/gokrb5.v3/client"
+	"gopkg.in/jcmturner/gokrb5.v3/config"
+	"gopkg.in/jcmturner/gokrb5.v3/keytab"
+	"log"
+	"os"
+	"strings"
 )
 
 // TODO: cp, tree, test, trash
+
+const hdfsDefaultServiceName = "nn"
 
 var (
 	version string
@@ -33,6 +39,12 @@ Valid commands:
   getmerge SOURCE DEST
   put SOURCE DEST
   df [-h]
+
+Environment variables to set : 
+  - HADOOP_KEYTAB=<path_to_keytab>
+  - HADOOP_KRB_CONF=<path_to_krb_conf>
+  - HADOOP_NAMENODE=<namenode1>:<port>,<namenode2>:<port>
+
 `, os.Args[0])
 
 	lsOpts = getopt.New()
@@ -169,24 +181,92 @@ func fatalWithUsage(msg ...interface{}) {
 	fatal(msg...)
 }
 
-func getClient(namenode string) (*hdfs.Client, error) {
+// getClient returns a HDFS client to the namenode or namenods provided.
+// if an empty string is provided, the env var HADOOP_NAMENODE is looked up.
+// one or multiple namenodes may be specified in a comma separated list: "<namenode1>:<port>,<namenode2>:<port>,..."
+func getClient(namenodes string) (*hdfs.Client, error) {
 	if cachedClient != nil {
 		return cachedClient, nil
 	}
 
-	if namenode == "" {
-		namenode = os.Getenv("HADOOP_NAMENODE")
+	if namenodes == "" {
+		namenodes = os.Getenv("HADOOP_NAMENODE")
 	}
 
-	if namenode == "" && os.Getenv("HADOOP_CONF_DIR") == "" {
+	if namenodes == "" && os.Getenv("HADOOP_CONF_DIR") == "" {
 		return nil, errors.New("Couldn't find a namenode to connect to. You should specify hdfs://<namenode>:<port> in your paths. Alternatively, set HADOOP_NAMENODE or HADOOP_CONF_DIR in your environment.")
 	}
 
-	c, err := hdfs.New(namenode)
+	options := hdfs.ClientOptions{}
+	// TODO: HA failover ?!
+	options.Addresses = strings.Split(namenodes, ",")
+	// Sets the kerberos client only if the relevant settings are set
+	options.KerberosClient = getKrbClientIfRequired()
+	options.ServicePrincipalName = getServiceName()
+
+	c, err := hdfs.NewClient(options)
 	if err != nil {
 		return nil, err
 	}
 
 	cachedClient = c
+
 	return cachedClient, nil
+}
+
+// getServiceName returns 'nn' unless the HADOOP_SNAME environment variable
+func getServiceName() string {
+	if sn := os.Getenv("HADOOP_SNAME"); sn != "" {
+		return sn
+	}
+	return hdfsDefaultServiceName
+}
+
+func getKrbClientIfRequired() *client.Client {
+	keytabPath := os.Getenv("HADOOP_KEYTAB")
+	krb5Cfg := os.Getenv("HADOOP_KRB_CONF")
+
+	if (keytabPath != "" && krb5Cfg == "") || (keytabPath == "" && krb5Cfg != "") {
+		log.Fatal("HADOOP_KEYTAB and HADOOP_KRB_CONF must either both be set or not at all.")
+	}
+
+	if keytabPath == "" {
+		return nil
+	}
+
+	return getKrbClientAndLogin(krb5Cfg, keytabPath)
+}
+
+func getKrbClientAndLogin(configPath string, keytabPath string) *client.Client {
+
+	cfg, cfgE := config.Load(configPath)
+
+	if cfgE != nil {
+		log.Fatal(cfgE)
+	}
+
+	kt, ktE := keytab.Load(keytabPath)
+
+	if ktE != nil {
+		log.Fatal(ktE)
+	}
+
+	entries := kt.Entries
+
+	if len(entries) == 0 {
+		log.Fatalf("no entries found in keytab %s" + keytabPath)
+	}
+
+	// Fetch the principal of the first entry
+	principal := entries[0].Principal
+
+	cl := client.NewClientWithKeytab(strings.Join(principal.Components, "/"), principal.Realm, kt)
+	cl.WithConfig(cfg)
+
+	// TODO Config flag or whatever for people not using AD
+	cl.GoKrb5Conf.DisablePAFXFast = true
+	if loginE := cl.Login(); loginE != nil {
+		log.Fatal(loginE)
+	}
+	return &cl
 }

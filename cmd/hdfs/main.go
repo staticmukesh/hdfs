@@ -16,6 +16,7 @@ import (
 // TODO: cp, tree, test, trash
 
 const hdfsDefaultServiceName = "nn"
+const krbDefaultCfgPath = "/etc/krb5.conf"
 
 var (
 	version string
@@ -222,16 +223,20 @@ func getServiceName() string {
 	return hdfsDefaultServiceName
 }
 
+// getKrbClientIfRequired returns a client if the environment variables suggest a client is required.
+// If HADOOP_KEYTAB is set, a kerberized cluster is assumed.
 func getKrbClientIfRequired() *client.Client {
 	keytabPath := os.Getenv("HADOOP_KEYTAB")
-	krb5Cfg := os.Getenv("HADOOP_KRB_CONF")
-
-	if (keytabPath != "" && krb5Cfg == "") || (keytabPath == "" && krb5Cfg != "") {
-		log.Fatal("HADOOP_KEYTAB and HADOOP_KRB_CONF must either both be set or not at all.")
-	}
 
 	if keytabPath == "" {
+		// Nothing to do
 		return nil
+	}
+
+	var krb5Cfg = os.Getenv("HADOOP_KRB_CONF")
+
+	if krb5Cfg == "" {
+		krb5Cfg = krbDefaultCfgPath
 	}
 
 	return getKrbClientAndLogin(krb5Cfg, keytabPath)

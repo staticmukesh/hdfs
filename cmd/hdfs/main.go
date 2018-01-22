@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"github.com/colinmarc/hdfs"
 	"github.com/pborman/getopt"
@@ -16,6 +15,7 @@ import (
 // TODO: cp, tree, test, trash
 
 const hdfsDefaultServiceName = "nn"
+const hdfsDefaultConfDir = "/etc/hadoop/conf"
 const krbDefaultCfgPath = "/etc/krb5.conf"
 
 var (
@@ -194,13 +194,9 @@ func getClient(namenodes string) (*hdfs.Client, error) {
 		namenodes = os.Getenv("HADOOP_NAMENODE")
 	}
 
-	if namenodes == "" && os.Getenv("HADOOP_CONF_DIR") == "" {
-		return nil, errors.New("Couldn't find a namenode to connect to. You should specify hdfs://<namenode>:<port> in your paths. Alternatively, set HADOOP_NAMENODE or HADOOP_CONF_DIR in your environment.")
-	}
-
 	options := hdfs.ClientOptions{}
 	// TODO: HA failover ?!
-	options.Addresses = strings.Split(namenodes, ",")
+	options.Addresses = getNameNodes()
 	// Sets the kerberos client only if the relevant settings are set
 	options.KerberosClient = getKrbClientIfRequired()
 	options.ServicePrincipalName = getServiceName()
@@ -215,12 +211,37 @@ func getClient(namenodes string) (*hdfs.Client, error) {
 	return cachedClient, nil
 }
 
+// getConfDir returns the content of HADOOP_CONF_DIR or a default path to the conf dir.
+func getConfDir() string {
+	if cd := os.Getenv("HADOOP_CONF_DIR"); cd != "" {
+		return cd
+	}
+	return hdfsDefaultConfDir
+}
+
 // getServiceName returns 'nn' unless the HADOOP_SNAME environment variable
 func getServiceName() string {
 	if sn := os.Getenv("HADOOP_SNAME"); sn != "" {
 		return sn
 	}
 	return hdfsDefaultServiceName
+}
+
+// getNameNodes checks the HADOOP_NAMENODE and the configuration directory in /etc/hadoop,
+// unless overridden via HADOOP_CONF_DIR to determine the namenode addresses.
+func getNameNodes() []string {
+
+	if env := os.Getenv("HADOOP_NAMENODE"); env != "" {
+		return strings.Split(env, ",")
+	}
+
+	nn, err := hdfs.LoadHadoopConf(getConfDir()).Namenodes()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return nn
 }
 
 // getKrbClientIfRequired returns a client if the environment variables suggest a client is required.

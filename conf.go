@@ -34,7 +34,8 @@ func LoadHadoopConf(inputPath string) HadoopConf {
 	var tryPaths []string
 
 	if inputPath != "" {
-		tryPaths = append(tryPaths, inputPath)
+		tryPaths = append(tryPaths, filepath.Join(inputPath, "core-site.xml"))
+		tryPaths = append(tryPaths, filepath.Join(inputPath, "hdfs-site.xml"))
 	} else {
 		hadoopConfDir := os.Getenv("HADOOP_CONF_DIR")
 		hadoopHome := os.Getenv("HADOOP_HOME")
@@ -50,7 +51,6 @@ func LoadHadoopConf(inputPath string) HadoopConf {
 		}
 	}
 	hadoopConf := make(HadoopConf)
-
 	for _, tryPath := range tryPaths {
 		pList := propertyList{}
 		f, err := ioutil.ReadFile(tryPath)

@@ -2,14 +2,15 @@ package rpc
 
 import (
 	"encoding/binary"
+	"io"
+	"log"
+	"strings"
+
 	hadoop "github.com/colinmarc/hdfs/protocol/hadoop_common"
 	"gopkg.in/jcmturner/gokrb5.v3/client"
 	"gopkg.in/jcmturner/gokrb5.v3/gssapi"
 	"gopkg.in/jcmturner/gokrb5.v3/iana/keyusage"
 	"gopkg.in/jcmturner/gokrb5.v3/types"
-	"io"
-	"log"
-	"strings"
 )
 
 const (

@@ -2,14 +2,18 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"strings"
+
+	"os/user"
+
 	"github.com/colinmarc/hdfs"
 	"github.com/pborman/getopt"
 	"gopkg.in/jcmturner/gokrb5.v3/client"
 	"gopkg.in/jcmturner/gokrb5.v3/config"
+	"gopkg.in/jcmturner/gokrb5.v3/credentials"
 	"gopkg.in/jcmturner/gokrb5.v3/keytab"
-	"log"
-	"os"
-	"strings"
 )
 
 // TODO: cp, tree, test, trash
@@ -17,6 +21,7 @@ import (
 const hdfsDefaultServiceName = "nn"
 const hdfsDefaultConfDir = "/etc/hadoop/conf"
 const krbDefaultCfgPath = "/etc/krb5.conf"
+const hadoopAuthCfgPath = "hadoop.security.authentication"
 
 var (
 	version string
@@ -194,11 +199,12 @@ func getClient(namenodes string) (*hdfs.Client, error) {
 		namenodes = os.Getenv("HADOOP_NAMENODE")
 	}
 
+	hadoopCfg := loadHadoopConf()
+
 	options := hdfs.ClientOptions{}
-	// TODO: HA failover ?!
-	options.Addresses = getNameNodes()
+	options.Addresses = getNameNodes(hadoopCfg)
 	// Sets the kerberos client only if the relevant settings are set
-	options.KerberosClient = getKrbClientIfRequired()
+	options.KerberosClient = getKrbClientIfRequired(hadoopCfg)
 	options.ServicePrincipalName = getServiceName()
 
 	c, err := hdfs.NewClient(options)
@@ -211,6 +217,14 @@ func getClient(namenodes string) (*hdfs.Client, error) {
 	return cachedClient, nil
 }
 
+// getServiceName returns 'nn' unless the HADOOP_SNAME environment variable is set
+func getServiceName() string {
+	if sn := os.Getenv("HADOOP_SNAME"); sn != "" {
+		return sn
+	}
+	return hdfsDefaultServiceName
+}
+
 // getConfDir returns the content of HADOOP_CONF_DIR or a default path to the conf dir.
 func getConfDir() string {
 	if cd := os.Getenv("HADOOP_CONF_DIR"); cd != "" {
@@ -219,62 +233,108 @@ func getConfDir() string {
 	return hdfsDefaultConfDir
 }
 
-// getServiceName returns 'nn' unless the HADOOP_SNAME environment variable
-func getServiceName() string {
-	if sn := os.Getenv("HADOOP_SNAME"); sn != "" {
-		return sn
-	}
-	return hdfsDefaultServiceName
+// loadHadoopConf attempts to load the hadop configuration from a specified or default path.
+func loadHadoopConf() hdfs.HadoopConf {
+	return hdfs.LoadHadoopConf(getConfDir())
 }
 
-// getNameNodes checks the HADOOP_NAMENODE and the configuration directory in /etc/hadoop,
-// unless overridden via HADOOP_CONF_DIR to determine the namenode addresses.
-func getNameNodes() []string {
+// getNameNodes checks the HADOOP_NAMENODE or the passed configuration for the namenode servers
+func getNameNodes(conf hdfs.HadoopConf) []string {
 
 	if env := os.Getenv("HADOOP_NAMENODE"); env != "" {
 		return strings.Split(env, ",")
 	}
 
-	nn, err := hdfs.LoadHadoopConf(getConfDir()).Namenodes()
+	nn, err := conf.Namenodes()
 
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 
 	return nn
 }
 
-// getKrbClientIfRequired returns a client if the environment variables suggest a client is required.
-// If HADOOP_KEYTAB is set, a kerberized cluster is assumed.
-func getKrbClientIfRequired() *client.Client {
-	keytabPath := os.Getenv("HADOOP_KEYTAB")
-
-	if keytabPath == "" {
-		// Nothing to do
+// getKrbClientIfRequired returns a client if the hadoop configuration or the environment variables suggest one is required
+func getKrbClientIfRequired(conf hdfs.HadoopConf) *client.Client {
+	// First check the config to see if Kerberos is required.
+	val, found := conf[hadoopAuthCfgPath]
+	if !found || "kerberos" != strings.ToLower(val) {
 		return nil
 	}
 
+	// Check if the kerberos config path has been overriden
 	var krb5Cfg = os.Getenv("HADOOP_KRB_CONF")
 
 	if krb5Cfg == "" {
 		krb5Cfg = krbDefaultCfgPath
 	}
 
-	return getKrbClientAndLogin(krb5Cfg, keytabPath)
+	// Now check if the credential cache or the keytab have been manually specified
+
+	keytabPath := os.Getenv("HADOOP_KEYTAB")
+
+	if keytabPath != "" {
+		// Nothing to do
+		return getKrbClientWithKeytab(krb5Cfg, keytabPath)
+	}
+
+	var credCachePath = os.Getenv("HADOOP_CCACHE")
+	if credCachePath == "" {
+		// Otherwise, fall back to the default one.
+		// TODO: read the kerberos config to determine where the cred cache is located?
+		credCachePath = getDefaultCredCachePath()
+	}
+
+	return getKrbClientWithCredCache(krb5Cfg, credCachePath)
 }
 
-func getKrbClientAndLogin(configPath string, keytabPath string) *client.Client {
+// returns /tmp/krb5cc_$(id -u $(whoami))
+func getDefaultCredCachePath() string {
+	u, e := user.Current()
+	if e != nil {
+		log.Panic(e)
+	}
+	return "/tmp/krb5cc_" + u.Uid
+}
+
+func getKrbClientWithCredCache(configPath string, cachePath string) *client.Client {
+	cfg, cfgE := config.Load(configPath)
+
+	if cfgE != nil {
+		log.Panic(cfgE)
+	}
+
+	cc, cce := credentials.LoadCCache(cachePath)
+
+	if cce != nil {
+		log.Panic(cce)
+	}
+
+	cl, clE := client.NewClientFromCCache(cc)
+	if clE != nil {
+		log.Panic(clE)
+	}
+
+	cl.WithConfig(cfg)
+	// TODO Config flag or whatever for people not using AD
+	cl.GoKrb5Conf.DisablePAFXFast = true
+
+	return &cl
+
+}
+
+func getKrbClientWithKeytab(configPath string, keytabPath string) *client.Client {
 
 	cfg, cfgE := config.Load(configPath)
 
 	if cfgE != nil {
-		log.Fatal(cfgE)
+		log.Panic(cfgE)
 	}
 
 	kt, ktE := keytab.Load(keytabPath)
 
 	if ktE != nil {
-		log.Fatal(ktE)
+		log.Panic(ktE)
 	}
 
 	entries := kt.Entries
@@ -292,7 +352,7 @@ func getKrbClientAndLogin(configPath string, keytabPath string) *client.Client {
 	// TODO Config flag or whatever for people not using AD
 	cl.GoKrb5Conf.DisablePAFXFast = true
 	if loginE := cl.Login(); loginE != nil {
-		log.Fatal(loginE)
+		log.Panic(loginE)
 	}
 	return &cl
 }

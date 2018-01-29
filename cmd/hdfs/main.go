@@ -46,12 +46,14 @@ Valid commands:
   put SOURCE DEST
   df [-h]
 
-Environment variables to set : 
-  - HADOOP_KEYTAB=<path_to_keytab>
-  - HADOOP_KRB_CONF=<path_to_krb_conf>
-  - HADOOP_NAMENODE=<namenode1>:<port>,<namenode2>:<port>
+To alter the default locations from which configurations are loaded, 
+the following environment variables may be used:
 
-`, os.Args[0])
+  - HADOOP_CONF_DIR     hadoop configuration directory. Default: %s
+  - HADOOP_KRB_CONF     kerberos configuration file. Default: %s
+  - HADOOP_CCACHE       credential cache to use. Defaults: to "/tmp/krb5cc_{user_uid}"
+  - HADOOP_KEYTAB       if set, the specified keytab is used and the credential cache is ignored.
+`, os.Args[0], hdfsDefaultConfDir, krbDefaultCfgPath)
 
 	lsOpts = getopt.New()
 	lsl    = lsOpts.Bool('l')

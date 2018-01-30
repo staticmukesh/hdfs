@@ -53,6 +53,14 @@ verbs:
       get SOURCE [DEST]
       getmerge SOURCE DEST
       put SOURCE DEST
+      
+      To alter the default locations from which configurations are loaded, 
+      the following environment variables may be used:
+
+        - HADOOP_CONF_DIR     hadoop configuration directory. Default: %s
+        - HADOOP_KRB_CONF     kerberos configuration file. Default: %s
+        - HADOOP_CCACHE       credential cache to use. Defaults: to "/tmp/krb5cc_{user_uid}"
+        - HADOOP_KEYTAB       if set, the specified keytab is used and the credential cache is ignored.
 
 Since it doesn't have to wait for the JVM to start up, it's also a lot faster
 `hadoop -fs`:
@@ -101,16 +109,15 @@ override this in your `.bashrc` or `.profile`:
 
 Kerberos support
 ----------------
-There is experimental Kerberos support for authentication (and authentication only). The following should be enough to get you started:
+Authentication via Kerberos (and authentication only) is supported.
 
-    export HADOOP_KEYTAB="path/to/keytab" 
-    export HADOOP_KRB_CONF="path/to/krb/conf"
+The binary will check the default locations for your kerberos and hadoop configurations. These can be overridden via environment variables `HADOOP_KRB_CONF`, and `HADOOP_CONF_DIR`.
 
-Note that if there is key material for more than one principal in the keytab, the first principal that is found is used for authentication against hadoop.
+You will need either a kinit’ed credential cache, which is expected to live at `/tmp/krb5cc_$(id -u $(whoami))` — override via `HADOOP_CCACHE` — or a keytab specified through `HADOOP_KEYTAB`.
 
-Furthermore, this requires a patch of the kerberos that is used (`gokrb5`), which is in the process of being reviewed: until it's officially part of `gokrb5`. Meanwhile, you may find the patch here: https://github.com/sqooba/gokrb5/tree/waiting-for-merge 
+This has only been tested on one or two different kerberized clusters: if you have trouble using it, feedback is more than welcome.
 
-It can be installed by being manually cloned into your go `src` tree under `src/gopkg.in/jcmturner/gokrb5.v3`
+
 
 Compatibility
 -------------

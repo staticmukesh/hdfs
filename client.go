@@ -23,7 +23,7 @@ type ClientOptions struct {
 	Namenode             *rpc.NamenodeConnection
 	User                 string
 	KerberosClient       *client.Client // Optional kerberos client, required for kerberized clusters
-	ServicePrincipalName string         // Service part of the SPN (<SERVICE>/<FQDN>, ie, hdfs/localhost) if Kerberos is enabled
+	ServicePrincipalName string         // Service part of the SPN (<SERVICE>/<FQDN>, ie, nn/localhost) if Kerberos is enabled
 }
 
 // Username returns the value of HADOOP_USER_NAME in the environment, or

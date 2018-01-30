@@ -13,9 +13,7 @@ import (
 	"gopkg.in/jcmturner/gokrb5.v3/types"
 )
 
-const (
-	saslRpcCallId int32 = -33
-)
+const saslRpcCallId int32 = -33
 
 // Run a Kerberos handshake with an hadoop Namenode server that is expected to live on the other side
 // of the connection.
@@ -31,13 +29,10 @@ func doKerberosHandshake(c *NamenodeConnection) {
 		log.Fatalf("Kerberos is not a supported auth mechanism. Supported mechanisms: %+v", mechanisms)
 	}
 
-	// Send the initial token, keep the session key
 	sessionKey := sendInitialToken(c, kerbMech)
 
-	// Check the handshake reply and extract the token from it
 	replyToken := readAuthReply(c)
 
-	// Verify the token's checksum
 	verifyChecksum(replyToken, sessionKey)
 
 	// Contains flags pertaining to the session config (protection level, etc)
@@ -46,13 +41,13 @@ func doKerberosHandshake(c *NamenodeConnection) {
 	toSendBack, err := gssapi.NewInitiatorToken(replyToken.Payload, sessionKey)
 
 	if err != nil {
-		log.Fatal("could not build an initiator token", err)
+		log.Panic("could not build an initiator token", err)
 	}
 
 	responseBytes, marshalErr := toSendBack.Marshal()
 
 	if marshalErr != nil {
-		log.Fatal("failed to marshal outbound token.", marshalErr)
+		log.Panic("failed to marshal outbound token.", marshalErr)
 	}
 
 	sendChallengeResponse(c, responseBytes)
@@ -74,10 +69,10 @@ func getKerberosAuthMech(mechanisms []*hadoop.RpcSaslProto_SaslAuth) *hadoop.Rpc
 func verifyChecksum(challenge gssapi.WrapToken, key types.EncryptionKey) {
 	ok, err := challenge.VerifyCheckSum(key, keyusage.GSSAPI_ACCEPTOR_SEAL)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 	if !ok {
-		log.Fatal("checksum mismatch")
+		log.Panic("checksum mismatch")
 	}
 }
 
@@ -131,7 +126,7 @@ func sendInitialToken(c *NamenodeConnection, mechanism *hadoop.RpcSaslProto_Sasl
 		})
 
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 
 	c.conn.Write(pkt)
@@ -147,12 +142,12 @@ func readAuthReply(c *NamenodeConnection) gssapi.WrapToken {
 	resp := readSaslResponse(c)
 
 	if resp.GetState() != hadoop.RpcSaslProto_CHALLENGE {
-		log.Fatalf("expected Sasl state CHALLENGE. Was: %v", resp.GetState())
+		log.Panicf("expected Sasl state CHALLENGE. Was: %v", resp.GetState())
 	}
 	var token gssapi.WrapToken
 
 	if err := token.Unmarshal(resp.GetToken(), true); err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 
 	return token
@@ -181,7 +176,7 @@ func readChallengeReply(c *NamenodeConnection) {
 	resp := readSaslResponse(c)
 
 	if resp.GetState() != hadoop.RpcSaslProto_SUCCESS {
-		log.Fatalf("server returned handshake failure: %+v", resp.GetState())
+		log.Panicf("server returned handshake failure: %+v", resp.GetState())
 	}
 }
 
@@ -203,7 +198,7 @@ func readSaslResponse(c *NamenodeConnection) *hadoop.RpcSaslProto {
 	err = readRPCPacket(packet, rrh, resp)
 
 	if rrh.GetStatus() != hadoop.RpcResponseHeaderProto_SUCCESS {
-		log.Fatalf("failed to read response: %s", rrh.GetStatus().String())
+		log.Panicf("failed to read response: %s", rrh.GetStatus().String())
 	}
 	return resp
 }
@@ -213,13 +208,13 @@ func getAPR(krbClient *client.Client, serviceName string, serviceHost string) (n
 	tkt, key, tktE := krbClient.GetServiceTicket(serviceName + "/" + serviceHost)
 
 	if tktE != nil {
-		log.Fatal(tktE)
+		log.Panic(tktE)
 	}
 
 	token, tokenE := gssapi.NewNegTokenInitKrb5(*krbClient.Credentials, tkt, key)
 
 	if tokenE != nil {
-		log.Fatal(tokenE)
+		log.Panic(tokenE)
 	}
 
 	return token, key

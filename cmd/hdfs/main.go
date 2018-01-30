@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
-
 	"os/user"
+	"strings"
 
 	"github.com/colinmarc/hdfs"
 	"github.com/pborman/getopt"
@@ -197,15 +196,15 @@ func getClient(namenodes string) (*hdfs.Client, error) {
 		return cachedClient, nil
 	}
 
-	if namenodes == "" {
-		namenodes = os.Getenv("HADOOP_NAMENODE")
-	}
-
 	hadoopCfg := loadHadoopConf()
 
 	options := hdfs.ClientOptions{}
-	options.Addresses = getNameNodes(hadoopCfg)
-	// Sets the kerberos client only if the relevant settings are set
+	if namenodes != "" {
+		options.Addresses = []string{namenodes}
+	} else {
+		options.Addresses = getNameNodes(hadoopCfg)
+	}
+
 	options.KerberosClient = getKrbClientIfRequired(hadoopCfg)
 	options.ServicePrincipalName = getServiceName()
 
@@ -272,17 +271,14 @@ func getKrbClientIfRequired(conf hdfs.HadoopConf) *client.Client {
 	}
 
 	// Now check if the credential cache or the keytab have been manually specified
-
 	keytabPath := os.Getenv("HADOOP_KEYTAB")
 
 	if keytabPath != "" {
-		// Nothing to do
 		return getKrbClientWithKeytab(krb5Cfg, keytabPath)
 	}
 
 	var credCachePath = os.Getenv("HADOOP_CCACHE")
 	if credCachePath == "" {
-		// Otherwise, fall back to the default one.
 		// TODO: read the kerberos config to determine where the cred cache is located?
 		credCachePath = getDefaultCredCachePath()
 	}
@@ -290,7 +286,7 @@ func getKrbClientIfRequired(conf hdfs.HadoopConf) *client.Client {
 	return getKrbClientWithCredCache(krb5Cfg, credCachePath)
 }
 
-// returns /tmp/krb5cc_$(id -u $(whoami))
+// returns "/tmp/krb5cc_$(id -u $(whoami))"
 func getDefaultCredCachePath() string {
 	u, e := user.Current()
 	if e != nil {

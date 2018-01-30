@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/colinmarc/hdfs"
-
-	"github.com/colinmarc/hdfs"
 )
 
 func put(args []string) {

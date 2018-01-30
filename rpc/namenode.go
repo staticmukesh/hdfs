@@ -4,13 +4,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	hadoop "github.com/colinmarc/hdfs/protocol/hadoop_common"
-	"github.com/golang/protobuf/proto"
-	"gopkg.in/jcmturner/gokrb5.v3/client"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	hadoop "github.com/colinmarc/hdfs/protocol/hadoop_common"
+	"github.com/golang/protobuf/proto"
+	"gopkg.in/jcmturner/gokrb5.v3/client"
 )
 
 const (
@@ -45,7 +46,7 @@ type NamenodeConnection struct {
 type NamenodeConnectionOptions struct {
 	Addresses            []string
 	User                 string         // This will contain the full user principal if kerberos is used
-	ServicePrincipalName string         // name of the service (usually "hdfs").
+	ServicePrincipalName string         // name of the service (usually "nn").
 	KerberosClient       *client.Client // Optional kerberos client
 }
 
@@ -307,13 +308,6 @@ func (c *NamenodeConnection) readResponse(method string, resp proto.Message) err
 	return nil
 }
 
-func (c *NamenodeConnection) writeNamenodeHandshake() error {
-	if c.kerberosClient != nil {
-		return c.writeNamenodeKerberosHandshake()
-	}
-	return c.writeNamenodeNoAuthHandshake()
-}
-
 // Connection header
 // +-----------------------------------------------------------+
 // |  Header, 4 bytes ("hrpc")                                 |
@@ -329,7 +323,7 @@ func (c *NamenodeConnection) writeNamenodeHandshake() error {
 // | Authentication handshake happens here, if required.       |
 // +-----------------------------------------------------------+
 
-// This is the request content. Not normally part of connection header
+// This is the request content.
 // +-----------------------------------------------------------+
 // |  uint32 length of the next two parts                      |
 // +-----------------------------------------------------------+
@@ -337,6 +331,13 @@ func (c *NamenodeConnection) writeNamenodeHandshake() error {
 // +-----------------------------------------------------------+
 // |  varint length + IpcConnectionContextProto                |
 // +-----------------------------------------------------------+
+func (c *NamenodeConnection) writeNamenodeHandshake() error {
+	if c.kerberosClient != nil {
+		return c.writeNamenodeKerberosHandshake()
+	}
+	return c.writeNamenodeNoAuthHandshake()
+}
+
 func (c *NamenodeConnection) writeNamenodeNoAuthHandshake() error {
 	rpcHeader := []byte{
 		0x68, 0x72, 0x70, 0x63, // "hrpc"

@@ -8,7 +8,7 @@ import (
 
 	hdfs "github.com/colinmarc/hdfs/protocol/hadoop_hdfs"
 	"github.com/colinmarc/hdfs/rpc"
-	"gopkg.in/jcmturner/gokrb5.v3/client"
+	krb "gopkg.in/jcmturner/gokrb5.v3/client"
 )
 
 // A Client represents a connection to an HDFS cluster
@@ -22,8 +22,10 @@ type ClientOptions struct {
 	Addresses            []string
 	Namenode             *rpc.NamenodeConnection
 	User                 string
-	KerberosClient       *client.Client // Optional kerberos client, required for kerberized clusters
-	ServicePrincipalName string         // Service part of the SPN (<SERVICE>/<FQDN>, ie, nn/localhost) if Kerberos is enabled
+	// KerberosClient for kerberized clusters. Will be `nil` if not required.
+	KerberosClient *krb.Client
+	// ServicePrincipalName the service part of the SPN (<SERVICE>/<FQDN>, ie, nn/localhost) if Kerberos is enabled
+	ServicePrincipalName string
 }
 
 // Username returns the value of HADOOP_USER_NAME in the environment, or
@@ -40,9 +42,9 @@ func Username() (string, error) {
 	return currentUser.Username, nil
 }
 
-// If the kerberos client is set, returns its principal.
-// Otherwise, defers to Username()
-func username(krb5Client *client.Client) (string, error) {
+// krbUsername returns the principle of krbClient,
+// or the result of calling Username if krbClient is nil
+func krbUsername(krb5Client *krb.Client) (string, error) {
 	if krb5Client == nil {
 		return Username()
 	}
@@ -56,7 +58,7 @@ func NewClient(options ClientOptions) (*Client, error) {
 	var err error
 
 	if options.User == "" {
-		options.User, err = username(options.KerberosClient)
+		options.User, err = krbUsername(options.KerberosClient)
 		if err != nil {
 			return nil, err
 		}

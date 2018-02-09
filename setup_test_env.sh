@@ -22,6 +22,15 @@ if [ ! -d "$HADOOP_HOME" ]; then
 
   echo "Extracting ${HADOOP_HOME}/hadoop.tar.gz into $HADOOP_HOME"
   tar zxf ${HADOOP_HOME}/hadoop.tar.gz --strip-components 1 -C $HADOOP_HOME
+
+fi
+
+if [ ${KERBEROS-"false"} = "true" ]; then
+  echo "Copying core-site.xml..."
+  cp "test/conf-kerberos/core-site.xml" "/tmp/kdc-home/"
+  cp "test/conf-kerberos/hdfs-site.xml" "/tmp/kdc-home/"
+  export HADOOP_CONF_DIR="/tmp/kdc-home/"
+  export HADOOP_OPTS="$HADOOP_OPTS -Djava.security.krb5.conf=/tmp/kdc-home/krb5.conf"
 fi
 
 MINICLUSTER_JAR=$(find $HADOOP_HOME -name "hadoop-mapreduce-client-jobclient*.jar" | grep -v tests | grep -v sources | head -1)
@@ -37,12 +46,16 @@ echo "Starting hadoop namenode..."
 $HADOOP_HOME/bin/hadoop jar $MINICLUSTER_JAR minicluster -nnport $NN_PORT -datanodes 3 -nomr -format "$@" > minicluster.log 2>&1 &
 sleep 30
 
-HADOOP_FS="$HADOOP_HOME/bin/hadoop fs -Ddfs.block.size=1048576"
+export KRB5_CONFIG=/tmp/kdc-home/krb5.conf
+HADOOP_FS="$HADOOP_HOME/bin/hadoop fs -Ddfs.block.size=1048576 -Dfs.defaultFS=hdfs://localhost:9000"
 $HADOOP_FS -mkdir -p "hdfs://$HADOOP_NAMENODE/_test"
 $HADOOP_FS -chmod 777 "hdfs://$HADOOP_NAMENODE/_test"
 
 $HADOOP_FS -put ./test/foo.txt "hdfs://$HADOOP_NAMENODE/_test/foo.txt"
 $HADOOP_FS -put ./test/mobydick.txt "hdfs://$HADOOP_NAMENODE/_test/mobydick.txt"
+
+echo "Current env vars:"
+export
 
 echo "Please run the following command:"
 echo "export HADOOP_NAMENODE='$HADOOP_NAMENODE'"

@@ -11,13 +11,13 @@ import (
 
 	hadoop "github.com/colinmarc/hdfs/protocol/hadoop_common"
 	"github.com/golang/protobuf/proto"
-	"gopkg.in/jcmturner/gokrb5.v3/client"
+	krb "gopkg.in/jcmturner/gokrb5.v3/client"
 )
 
 const (
 	rpcVersion            = 0x09
 	serviceClass          = 0x0
-	saslAuthProtocol      = 223
+	saslAuthProtocol      = 0xdf
 	noneAuthProtocol      = 0
 	protocolClass         = "org.apache.hadoop.hdfs.protocol.ClientProtocol"
 	protocolClassVersion  = 1
@@ -38,16 +38,22 @@ type NamenodeConnection struct {
 	host                 *namenodeHost
 	hostList             []*namenodeHost
 	reqLock              sync.Mutex
-	kerberosClient       *client.Client // Optional kerberos client for kerberized clusters
+	// KerberosClient for kerberized clusters. Will be `nil` if not required.
+	kerberosClient *krb.Client
+	// ServicePrincipalName the service part of the SPN (<SERVICE>/<FQDN>, ie, nn/localhost) if Kerberos is enabled
+	servicePrincipalName string
 }
 
 // NamenodeConnectionOptions represents the configurable options available
 // for a NamenodeConnection.
 type NamenodeConnectionOptions struct {
 	Addresses            []string
-	User                 string         // This will contain the full user principal if kerberos is used
-	ServicePrincipalName string         // name of the service (usually "nn").
-	KerberosClient       *client.Client // Optional kerberos client
+	// User should contain the full user principal if kerberos is used
+	User string
+	// KerberosClient for kerberized clusters. Will be `nil` if not required.
+	KerberosClient *krb.Client
+	// ServicePrincipalName the service part of the SPN (<SERVICE>/<FQDN>, ie, nn/localhost) if Kerberos is enabled
+	ServicePrincipalName string
 }
 
 // NamenodeError represents an interepreted error from the Namenode, including
@@ -308,7 +314,6 @@ func (c *NamenodeConnection) readResponse(method string, resp proto.Message) err
 	return nil
 }
 
-// Connection header
 // +-----------------------------------------------------------+
 // |  Header, 4 bytes ("hrpc")                                 |
 // +-----------------------------------------------------------+
@@ -320,10 +325,10 @@ func (c *NamenodeConnection) readResponse(method string, resp proto.Message) err
 // +-----------------------------------------------------------+
 
 // +-----------------------------------------------------------+
-// | Authentication handshake happens here, if required.       |
+// | Kerberos Auth handshake happens here, if required.        |
 // +-----------------------------------------------------------+
 
-// This is the request content.
+// +-----------------------------------------------------------+
 // +-----------------------------------------------------------+
 // |  uint32 length of the next two parts                      |
 // +-----------------------------------------------------------+
@@ -331,19 +336,26 @@ func (c *NamenodeConnection) readResponse(method string, resp proto.Message) err
 // +-----------------------------------------------------------+
 // |  varint length + IpcConnectionContextProto                |
 // +-----------------------------------------------------------+
+
 func (c *NamenodeConnection) writeNamenodeHandshake() error {
+
+	var authProto byte = noneAuthProtocol
 	if c.kerberosClient != nil {
-		return c.writeNamenodeKerberosHandshake()
+		authProto = saslAuthProtocol
 	}
-	return c.writeNamenodeNoAuthHandshake()
-}
 
 func (c *NamenodeConnection) writeNamenodeNoAuthHandshake() error {
 	rpcHeader := []byte{
 		0x68, 0x72, 0x70, 0x63, // "hrpc"
 		rpcVersion,
 		serviceClass,
-		noneAuthProtocol,
+		authProto,
+	}
+
+	c.conn.Write(rpcHeader)
+
+	if authProto == saslAuthProtocol {
+		doKerberosHandshake(c)
 	}
 
 	rrh := newRPCRequestHeader(handshakeCallID, c.clientId)
@@ -354,7 +366,7 @@ func (c *NamenodeConnection) writeNamenodeNoAuthHandshake() error {
 		return err
 	}
 
-	_, err = c.conn.Write(append(rpcHeader, packet...))
+	_, err = c.conn.Write(packet)
 	return err
 }
 

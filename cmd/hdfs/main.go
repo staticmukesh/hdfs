@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/user"
+	"strings"
 	"strings"
 
 	"github.com/colinmarc/hdfs"
@@ -48,11 +48,11 @@ Valid commands:
 To alter the default locations from which configurations are loaded, 
 the following environment variables may be used:
 
-  - HADOOP_CONF_DIR     hadoop configuration directory. Default: %s
+  - HADOOP_CONF_DIR     hadoop configuration directory. Defaults to $HADOOP_HOME/conf 
   - HADOOP_KRB_CONF     kerberos configuration file. Default: %s
   - HADOOP_CCACHE       credential cache to use. Defaults: to "/tmp/krb5cc_{user_uid}"
   - HADOOP_KEYTAB       if set, the specified keytab is used and the credential cache is ignored.
-`, os.Args[0], hdfsDefaultConfDir, krbDefaultCfgPath)
+`, os.Args[0], hdfs.KrbDefaultCfgPath)
 
 	lsOpts = getopt.New()
 	lsl    = lsOpts.Bool('l')
@@ -196,17 +196,17 @@ func getClient(namenodes string) (*hdfs.Client, error) {
 		return cachedClient, nil
 	}
 
-	hadoopCfg := loadHadoopConf()
+	hadoopCfg := hdfs.LoadHadoopConf("")
 
 	options := hdfs.ClientOptions{}
 	if namenodes != "" {
-		options.Addresses = []string{namenodes}
+		options.Addresses = strings.Split(namenodes, ",")
 	} else {
 		options.Addresses = getNameNodes(hadoopCfg)
 	}
 
-	options.KerberosClient = getKrbClientIfRequired(hadoopCfg)
-	options.ServicePrincipalName = getServiceName()
+	options.KerberosClient = hdfs.GetKrbClientIfRequired(hadoopCfg)
+	options.ServicePrincipalName = hdfs.GetServiceName()
 
 	c, err := hdfs.NewClient(options)
 	if err != nil {
@@ -218,20 +218,20 @@ func getClient(namenodes string) (*hdfs.Client, error) {
 	return cachedClient, nil
 }
 
-// getServiceName returns 'nn' unless the HADOOP_SNAME environment variable is set
-func getServiceName() string {
-	if sn := os.Getenv("HADOOP_SNAME"); sn != "" {
-		return sn
-	}
-	return hdfsDefaultServiceName
-}
+// getNameNodes checks the HADOOP_NAMENODE or the passed configuration for the namenode servers
+func getNameNodes(conf hdfs.HadoopConf) []string {
 
-// getConfDir returns the content of HADOOP_CONF_DIR or a default path to the conf dir.
-func getConfDir() string {
-	if cd := os.Getenv("HADOOP_CONF_DIR"); cd != "" {
-		return cd
+	if env := os.Getenv("HADOOP_NAMENODE"); env != "" {
+		return strings.Split(env, ",")
 	}
-	return hdfsDefaultConfDir
+
+	nn, err := conf.Namenodes()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return nn
 }
 
 // loadHadoopConf attempts to load the hadop configuration from a specified or default path.

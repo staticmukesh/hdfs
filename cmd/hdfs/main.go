@@ -5,14 +5,9 @@ import (
 	"log"
 	"os"
 	"strings"
-	"strings"
 
 	"github.com/colinmarc/hdfs"
 	"github.com/pborman/getopt"
-	"gopkg.in/jcmturner/gokrb5.v3/client"
-	"gopkg.in/jcmturner/gokrb5.v3/config"
-	"gopkg.in/jcmturner/gokrb5.v3/credentials"
-	"gopkg.in/jcmturner/gokrb5.v3/keytab"
 )
 
 // TODO: cp, tree, test, trash
@@ -28,7 +23,7 @@ var (
 The flags available are a subset of the POSIX ones, but should behave similarly.
 
 Valid commands:
-  ls [-lah] [FILE]...
+  ls [-lahj] [FILE]...
   rm [-rf] FILE...
   mv [-nT] SOURCE... DEST
   mkdir [-p] FILE...
@@ -58,6 +53,7 @@ the following environment variables may be used:
 	lsl    = lsOpts.Bool('l')
 	lsa    = lsOpts.Bool('a')
 	lsh    = lsOpts.Bool('h')
+	lsj    = lsOpts.Bool('j', "Print JSON formatted output")
 
 	rmOpts = getopt.New()
 	rmr    = rmOpts.Bool('r')
@@ -122,7 +118,7 @@ func main() {
 		fatal("gohdfs version", version)
 	case "ls":
 		lsOpts.Parse(argv)
-		ls(lsOpts.Args(), *lsl, *lsa, *lsh)
+		ls(lsOpts.Args(), *lsl, *lsa, *lsh, *lsj)
 	case "rm":
 		rmOpts.Parse(argv)
 		rm(rmOpts.Args(), *rmr, *rmf)
@@ -232,125 +228,4 @@ func getNameNodes(conf hdfs.HadoopConf) []string {
 	}
 
 	return nn
-}
-
-// loadHadoopConf attempts to load the hadop configuration from a specified or default path.
-func loadHadoopConf() hdfs.HadoopConf {
-	return hdfs.LoadHadoopConf(getConfDir())
-}
-
-// getNameNodes checks the HADOOP_NAMENODE or the passed configuration for the namenode servers
-func getNameNodes(conf hdfs.HadoopConf) []string {
-
-	if env := os.Getenv("HADOOP_NAMENODE"); env != "" {
-		return strings.Split(env, ",")
-	}
-
-	nn, err := conf.Namenodes()
-
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return nn
-}
-
-// getKrbClientIfRequired returns a client if the hadoop configuration or the environment variables suggest one is required
-func getKrbClientIfRequired(conf hdfs.HadoopConf) *client.Client {
-	// First check the config to see if Kerberos is required.
-	val, found := conf[hadoopAuthCfgPath]
-	if !found || "kerberos" != strings.ToLower(val) {
-		return nil
-	}
-
-	// Check if the kerberos config path has been overriden
-	var krb5Cfg = os.Getenv("HADOOP_KRB_CONF")
-
-	if krb5Cfg == "" {
-		krb5Cfg = krbDefaultCfgPath
-	}
-
-	// Now check if the credential cache or the keytab have been manually specified
-	keytabPath := os.Getenv("HADOOP_KEYTAB")
-
-	if keytabPath != "" {
-		return getKrbClientWithKeytab(krb5Cfg, keytabPath)
-	}
-
-	var credCachePath = os.Getenv("HADOOP_CCACHE")
-	if credCachePath == "" {
-		// TODO: read the kerberos config to determine where the cred cache is located?
-		credCachePath = getDefaultCredCachePath()
-	}
-
-	return getKrbClientWithCredCache(krb5Cfg, credCachePath)
-}
-
-// returns "/tmp/krb5cc_$(id -u $(whoami))"
-func getDefaultCredCachePath() string {
-	u, e := user.Current()
-	if e != nil {
-		log.Panic(e)
-	}
-	return "/tmp/krb5cc_" + u.Uid
-}
-
-func getKrbClientWithCredCache(configPath string, cachePath string) *client.Client {
-	cfg, cfgE := config.Load(configPath)
-
-	if cfgE != nil {
-		log.Panic(cfgE)
-	}
-
-	cc, cce := credentials.LoadCCache(cachePath)
-
-	if cce != nil {
-		log.Panic(cce)
-	}
-
-	cl, clE := client.NewClientFromCCache(cc)
-	if clE != nil {
-		log.Panic(clE)
-	}
-
-	cl.WithConfig(cfg)
-	// TODO Config flag or whatever for people not using AD
-	cl.GoKrb5Conf.DisablePAFXFast = true
-
-	return &cl
-
-}
-
-func getKrbClientWithKeytab(configPath string, keytabPath string) *client.Client {
-
-	cfg, cfgE := config.Load(configPath)
-
-	if cfgE != nil {
-		log.Panic(cfgE)
-	}
-
-	kt, ktE := keytab.Load(keytabPath)
-
-	if ktE != nil {
-		log.Panic(ktE)
-	}
-
-	entries := kt.Entries
-
-	if len(entries) == 0 {
-		log.Fatalf("no entries found in keytab %s" + keytabPath)
-	}
-
-	// Fetch the principal of the first entry
-	principal := entries[0].Principal
-
-	cl := client.NewClientWithKeytab(strings.Join(principal.Components, "/"), principal.Realm, kt)
-	cl.WithConfig(cfg)
-
-	// TODO Config flag or whatever for people not using AD
-	cl.GoKrb5Conf.DisablePAFXFast = true
-	if loginE := cl.Login(); loginE != nil {
-		log.Panic(loginE)
-	}
-	return &cl
 }

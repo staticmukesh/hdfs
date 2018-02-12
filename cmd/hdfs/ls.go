@@ -13,7 +13,8 @@ import (
 	"github.com/colinmarc/hdfs"
 )
 
-func ls(paths []string, long, all, humanReadable bool) {
+
+func ls(paths []string, long, all, humanReadable bool, jsonFormat bool) {
 	paths, client, err := getClientAndExpandedPaths(paths)
 	if err != nil {
 		fatal(err)
@@ -26,6 +27,7 @@ func ls(paths []string, long, all, humanReadable bool) {
 	files := make([]string, 0, len(paths))
 	fileInfos := make([]os.FileInfo, 0, len(paths))
 	dirs := make([]string, 0, len(paths))
+
 	for _, p := range paths {
 		fi, err := client.Stat(p)
 		if err != nil {
@@ -40,34 +42,52 @@ func ls(paths []string, long, all, humanReadable bool) {
 		}
 	}
 
-	if len(files) == 0 && len(dirs) == 1 {
-		printDir(client, dirs[0], long, all, humanReadable)
-	} else {
-		if long {
-			tw := lsTabWriter()
-			for i, p := range files {
-				printLong(tw, p, fileInfos[i], humanReadable)
-			}
+	if jsonFormat {
+		fmt.Print("[")
+	}
 
-			tw.Flush()
-		} else {
-			for _, p := range files {
-				fmt.Println(p)
-			}
+	if len(files) == 0 && len(dirs) == 1 {
+		printDir(client, dirs[0], long, all, humanReadable, jsonFormat, true)
+	} else {
+
+		var tw *tabwriter.Writer
+		if long {
+			tw = lsTabWriter()
+			defer tw.Flush()
 		}
 
+		first := true
+
+		for i, p := range files {
+			if long {
+				parentPath := path.Join(p, "..")
+				printLong(tw, p, parentPath, fileInfos[i], humanReadable, jsonFormat, first)
+			} else {
+				printShort(p, jsonFormat, first)
+			}
+			first = false
+		}
+
+
 		for i, dir := range dirs {
-			if i > 0 {
+			if i > 0 && !jsonFormat {
 				fmt.Println()
 			}
 
-			fmt.Printf("%s/:\n", dir)
-			printDir(client, dir, long, all, humanReadable)
+			if !jsonFormat {
+				fmt.Printf("%s/:\n", dir)
+			}
+			printDir(client, dir, long, all, humanReadable, jsonFormat, first)
+			first = false
 		}
+	}
+
+	if jsonFormat {
+		fmt.Println("\n]")
 	}
 }
 
-func printDir(client *hdfs.Client, dir string, long, all, humanReadable bool) {
+func printDir(client *hdfs.Client, dir string, long, all, humanReadable bool, jsonFormat bool, first bool) {
 	dirReader, err := client.Open(dir)
 	if err != nil {
 		fatal(err)
@@ -79,25 +99,25 @@ func printDir(client *hdfs.Client, dir string, long, all, humanReadable bool) {
 		defer tw.Flush()
 	}
 
-	if all {
+	if all && !jsonFormat {
 		if long {
 			dirInfo, err := client.Stat(dir)
 			if err != nil {
 				fatal(err)
 			}
-
 			parentPath := path.Join(dir, "..")
 			parentInfo, err := client.Stat(parentPath)
 			if err != nil {
 				fatal(err)
 			}
 
-			printLong(tw, ".", dirInfo, humanReadable)
-			printLong(tw, "..", parentInfo, humanReadable)
+			printLong(tw, ".", parentPath, dirInfo, humanReadable, jsonFormat, first)
+			printLong(tw, "..", parentPath, parentInfo, humanReadable, jsonFormat, false)
 		} else {
-			fmt.Println(".")
-			fmt.Println("..")
+			printShort(".", jsonFormat, first)
+			printShort("..", jsonFormat, false)
 		}
+		first = false
 	}
 
 	var partial []os.FileInfo
@@ -106,29 +126,46 @@ func printDir(client *hdfs.Client, dir string, long, all, humanReadable bool) {
 			fatal(err)
 		}
 
-		printFiles(tw, partial, long, all, humanReadable)
-	}
-
-	if long {
-		tw.Flush()
+		printFiles(tw, partial, dir, long, all, humanReadable, jsonFormat, first)
+		if first == true && len(partial) > 0 {
+			first = false
+		}
 	}
 }
 
-func printFiles(tw *tabwriter.Writer, files []os.FileInfo, long, all, humanReadable bool) {
+func printFiles(tw *tabwriter.Writer, files []os.FileInfo, parent string, long, all, humanReadable bool, jsonFormat bool, first bool) {
 	for _, file := range files {
 		if !all && strings.HasPrefix(file.Name(), ".") {
 			continue
 		}
 
 		if long {
-			printLong(tw, file.Name(), file, humanReadable)
+			printLong(tw, file.Name(), parent, file, humanReadable, jsonFormat, first)
 		} else {
-			fmt.Println(file.Name())
+			fileName := file.Name()
+			if jsonFormat {
+				fileName = fmt.Sprint(parent, "/", file.Name())
+			}
+			printShort(fileName, jsonFormat, first)
 		}
+		first = false
 	}
 }
 
-func printLong(tw *tabwriter.Writer, name string, info os.FileInfo, humanReadable bool) {
+func printShort(name string, jsonFormat bool, first bool) {
+
+	if jsonFormat {
+		if !first {
+			fmt.Printf(",")
+		}
+		fmt.Printf("\n    { \"name\": \"%s\"}",
+			name)
+	} else {
+		fmt.Println(name)
+	}
+}
+
+func printLong(tw *tabwriter.Writer, name string, parent string, info os.FileInfo, humanReadable bool, jsonFormat bool, first bool) {
 	fi := info.(*hdfs.FileInfo)
 	// mode owner group size date(\w tab) time/year name
 	mode := fi.Mode().String()
@@ -148,8 +185,17 @@ func printLong(tw *tabwriter.Writer, name string, info os.FileInfo, humanReadabl
 		timeOrYear = modtime.Format("2006")
 	}
 
-	fmt.Fprintf(tw, "%s \t%s \t %s \t %s \t%s \t%s \t%s\n",
-		mode, owner, group, size, date, timeOrYear, name)
+	if jsonFormat {
+		if !first {
+			fmt.Printf(",")
+		}
+		fmt.Printf("\n    { \"mode\": \"%s\", \"owner\": \"%s\", \"group\": \"%s\", \"size\": %s, \"modTime\": \"%s\", \"name\": \"%s/%s\"}",
+			mode, owner, group, size, modtime, parent, fi.Name())
+
+	} else {
+		fmt.Fprintf(tw, "%s \t%s \t %s \t %s \t%s \t%s \t%s\n",
+			mode, owner, group, size, date, timeOrYear, name)
+	}
 }
 
 func lsTabWriter() *tabwriter.Writer {

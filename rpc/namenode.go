@@ -29,15 +29,14 @@ const backoffDuration = time.Second * 5
 
 // NamenodeConnection represents an open connection to a namenode.
 type NamenodeConnection struct {
-	clientId             []byte
-	clientName           string
-	currentRequestID     int
-	user                 string
-	servicePrincipalName string
-	conn                 net.Conn
-	host                 *namenodeHost
-	hostList             []*namenodeHost
-	reqLock              sync.Mutex
+	clientId         []byte
+	clientName       string
+	currentRequestID int
+	user             string
+	conn             net.Conn
+	host             *namenodeHost
+	hostList         []*namenodeHost
+	reqLock          sync.Mutex
 	// KerberosClient for kerberized clusters. Will be `nil` if not required.
 	kerberosClient *krb.Client
 	// ServicePrincipalName the service part of the SPN (<SERVICE>/<FQDN>, ie, nn/localhost) if Kerberos is enabled
@@ -47,7 +46,7 @@ type NamenodeConnection struct {
 // NamenodeConnectionOptions represents the configurable options available
 // for a NamenodeConnection.
 type NamenodeConnectionOptions struct {
-	Addresses            []string
+	Addresses []string
 	// User should contain the full user principal if kerberos is used
 	User string
 	// KerberosClient for kerberized clusters. Will be `nil` if not required.
@@ -144,7 +143,7 @@ func WrapNamenodeConnection(conn net.Conn, user string) (*NamenodeConnection, er
 		hostList:   make([]*namenodeHost, 0),
 	}
 
-	err := c.writeNamenodeNoAuthHandshake()
+	err := c.writeNamenodeHandshake()
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("Error performing handshake: %s", err)
@@ -329,7 +328,6 @@ func (c *NamenodeConnection) readResponse(method string, resp proto.Message) err
 // +-----------------------------------------------------------+
 
 // +-----------------------------------------------------------+
-// +-----------------------------------------------------------+
 // |  uint32 length of the next two parts                      |
 // +-----------------------------------------------------------+
 // |  varint length + RpcRequestHeaderProto                    |
@@ -344,7 +342,6 @@ func (c *NamenodeConnection) writeNamenodeHandshake() error {
 		authProto = saslAuthProtocol
 	}
 
-func (c *NamenodeConnection) writeNamenodeNoAuthHandshake() error {
 	rpcHeader := []byte{
 		0x68, 0x72, 0x70, 0x63, // "hrpc"
 		rpcVersion,
@@ -357,33 +354,6 @@ func (c *NamenodeConnection) writeNamenodeNoAuthHandshake() error {
 	if authProto == saslAuthProtocol {
 		doKerberosHandshake(c)
 	}
-
-	rrh := newRPCRequestHeader(handshakeCallID, c.clientId)
-	cc := newConnectionContext(c.user)
-	packet, err := makeRPCPacket(rrh, cc)
-
-	if err != nil {
-		return err
-	}
-
-	_, err = c.conn.Write(packet)
-	return err
-}
-
-func (c *NamenodeConnection) writeNamenodeKerberosHandshake() error {
-
-	// Connection header, to be written when the socket is open
-	rpcHeader := []byte{
-		0x68, 0x72, 0x70, 0x63, // "hrpc"
-		rpcVersion,
-		serviceClass,
-		saslAuthProtocol,
-	}
-	if _, err := c.conn.Write(rpcHeader); err != nil {
-		return err
-	}
-
-	doKerberosHandshake(c)
 
 	rrh := newRPCRequestHeader(handshakeCallID, c.clientId)
 	cc := newConnectionContext(c.user)

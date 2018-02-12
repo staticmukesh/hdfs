@@ -41,7 +41,6 @@ func LoadHadoopConf(path string) HadoopConf {
 			path = filepath.Join(os.Getenv("HADOOP_HOME"), "conf")
 		}
 	}
-
 	hadoopConf := make(HadoopConf)
 	for _, file := range []string{"core-site.xml", "hdfs-site.xml"} {
 		pList := propertyList{}

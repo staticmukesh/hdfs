@@ -41,7 +41,7 @@ func chown(args []string, recursive bool) {
 
 	for _, p := range expanded {
 		if recursive {
-			err = walk(client, p, visit)
+			err = client.Walk(p, visit)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				status = 1

@@ -10,11 +10,13 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"log"
+
 	"github.com/colinmarc/hdfs"
+	"path/filepath"
 )
 
-
-func ls(paths []string, long, all, humanReadable bool, jsonFormat bool) {
+func ls(paths []string, long, all, rec, humanReadable bool, jsonFormat bool) {
 	paths, client, err := getClientAndExpandedPaths(paths)
 	if err != nil {
 		fatal(err)
@@ -27,6 +29,17 @@ func ls(paths []string, long, all, humanReadable bool, jsonFormat bool) {
 	files := make([]string, 0, len(paths))
 	fileInfos := make([]os.FileInfo, 0, len(paths))
 	dirs := make([]string, 0, len(paths))
+
+	// TODO support rec with other flags (-l, -lh, ...): split listing files from printing.
+	if rec {
+		for _, p := range paths {
+			files = append(files, lsFilesRec(client, p)...)
+		}
+		for _, f := range files {
+			fmt.Println(f)
+		}
+		return
+	}
 
 	for _, p := range paths {
 		fi, err := client.Stat(p)
@@ -67,7 +80,6 @@ func ls(paths []string, long, all, humanReadable bool, jsonFormat bool) {
 			}
 			first = false
 		}
-
 
 		for i, dir := range dirs {
 			if i > 0 && !jsonFormat {
@@ -200,4 +212,26 @@ func printLong(tw *tabwriter.Writer, name string, parent string, info os.FileInf
 
 func lsTabWriter() *tabwriter.Writer {
 	return tabwriter.NewWriter(os.Stdout, 3, 8, 0, ' ', tabwriter.AlignRight|tabwriter.TabIndent)
+}
+
+func lsFilesRecVisit(filePaths *[]string) filepath.WalkFunc {
+	return func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() {
+			*filePaths = append(*filePaths, path)
+		}
+		return nil
+	}
+}
+
+func lsFilesRec(client *hdfs.Client, root string) []string {
+
+	filePaths := make([]string, 0, 32)
+
+	err := client.Walk(root, lsFilesRecVisit(&filePaths))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return filePaths
 }

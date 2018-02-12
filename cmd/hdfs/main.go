@@ -54,6 +54,7 @@ the following environment variables may be used:
 	lsa    = lsOpts.Bool('a')
 	lsh    = lsOpts.Bool('h')
 	lsj    = lsOpts.Bool('j', "Print JSON formatted output")
+	lsr    = lsOpts.Bool('r')
 
 	rmOpts = getopt.New()
 	rmr    = rmOpts.Bool('r')
@@ -118,7 +119,7 @@ func main() {
 		fatal("gohdfs version", version)
 	case "ls":
 		lsOpts.Parse(argv)
-		ls(lsOpts.Args(), *lsl, *lsa, *lsh, *lsj)
+		ls(lsOpts.Args(), *lsl, *lsa, *lsr, *lsh, *lsj)
 	case "rm":
 		rmOpts.Parse(argv)
 		rm(rmOpts.Args(), *rmr, *rmf)

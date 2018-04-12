@@ -8,7 +8,7 @@ import (
 
 	hdfs "github.com/colinmarc/hdfs/protocol/hadoop_hdfs"
 	"github.com/colinmarc/hdfs/rpc"
-	krb "gopkg.in/jcmturner/gokrb5.v3/client"
+	krb "gopkg.in/jcmturner/gokrb5.v4/client"
 )
 
 // A Client represents a connection to an HDFS cluster
@@ -19,9 +19,9 @@ type Client struct {
 
 // ClientOptions represents the configurable options for a client.
 type ClientOptions struct {
-	Addresses            []string
-	Namenode             *rpc.NamenodeConnection
-	User                 string
+	Addresses []string
+	Namenode  *rpc.NamenodeConnection
+	User      string
 	// KerberosClient for kerberized clusters. Will be `nil` if not required.
 	KerberosClient *krb.Client
 	// ServicePrincipalName the service part of the SPN (<SERVICE>/<FQDN>, ie, nn/localhost) if Kerberos is enabled
